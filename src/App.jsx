@@ -226,7 +226,7 @@ export default function App() {
 
   return (
     <div style={{ background: COLORS.stout, minHeight: "100vh", fontFamily: "system-ui, -apple-system, sans-serif", color: COLORS.cream, padding: "0" }}>
-      <div style={{ maxWidth: "480px", margin: "0 auto", padding: "28px 20px 60px" }}>
+      <div style={{ maxWidth: "480px", margin: "0 auto", padding: "calc(28px + env(safe-area-inset-top)) 20px 60px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
           <h1 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "27px", fontWeight: "400", letterSpacing: "0.2px", margin: 0, color: COLORS.cream }}>
             Dads Keg Tracker
