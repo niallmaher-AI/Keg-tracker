@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      window.__splashStart = Date.now();
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/icon-192.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -16,9 +19,65 @@
     <link rel="apple-touch-startup-image" href="/splash-750x1334.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Dads Keg Tracker</title>
+    <style>
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #000000 center center no-repeat;
+        background-size: cover;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.4s ease;
+      }
+      #app-splash img {
+        width: 84px;
+        height: 84px;
+      }
+      @media (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) {
+        #app-splash { background-image: url('/splash-1170x2532.png'); }
+        #app-splash img { display: none; }
+      }
+      @media (device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) {
+        #app-splash { background-image: url('/splash-1284x2778.png'); }
+        #app-splash img { display: none; }
+      }
+      @media (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) {
+        #app-splash { background-image: url('/splash-1179x2556.png'); }
+        #app-splash img { display: none; }
+      }
+      @media (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) {
+        #app-splash { background-image: url('/splash-1290x2796.png'); }
+        #app-splash img { display: none; }
+      }
+      @media (device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) {
+        #app-splash { background-image: url('/splash-750x1334.png'); }
+        #app-splash img { display: none; }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="app-splash">
+      <img src="/icon-512.png" alt="" />
+    </div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      window.addEventListener("load", function () {
+        var minMs = 2000;
+        var elapsed = Date.now() - window.__splashStart;
+        var wait = Math.max(0, minMs - elapsed);
+        setTimeout(function () {
+          var el = document.getElementById("app-splash");
+          if (el) {
+            el.style.opacity = "0";
+            setTimeout(function () {
+              el.remove();
+            }, 400);
+          }
+        }, wait);
+      });
+    </script>
   </body>
 </html>
