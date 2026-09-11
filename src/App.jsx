@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Beer, Plus, Check, Minus, Trash2, RotateCcw, AlertCircle } from "lucide-react";
+import { Plus, Check, Minus, Trash2, RotateCcw, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
 const PINTS_PER_SHARE = 22;
 const PRICE_PER_SHARE = 45;
 const ROW_ID = 1;
+const MAX_LOG_ENTRIES = 100;
 
 const COLORS = {
-  stout: "#17110D",
-  stoutLine: "#2E2318",
-  cream: "#EDE4D0",
-  creamDim: "#A99C82",
+  stout: "#000000",
+  stoutLine: "#2A2A2A",
+  cream: "#F5EFE0",
+  creamDim: "#B8AD94",
   brass: "#C09A4F",
   brassDim: "#8A6E38",
   warn: "#B8503B",
@@ -21,14 +22,47 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
+function formatTimestamp(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function KegIcon({ size = 24, color = COLORS.brass }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="10.5" y="1.2" width="3" height="1.8" rx="0.4" fill={color} />
+      <path
+        d="M9 3H15V4.6C17.4 5.7 19 8.6 19 12C19 15.4 17.4 18.3 15 19.4V21H9V19.4C6.6 18.3 5 15.4 5 12C5 8.6 6.6 5.7 9 4.6V3Z"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <line x1="5.6" y1="8.8" x2="18.4" y2="8.8" stroke={color} strokeWidth="1.1" opacity="0.85" />
+      <line x1="5.2" y1="15.2" x2="18.8" y2="15.2" stroke={color} strokeWidth="1.1" opacity="0.85" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [members, setMembers] = useState(null);
   const [round, setRound] = useState(1);
+  const [log, setLog] = useState([]);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null);
+  const [showLog, setShowLog] = useState(false);
   const skipNextSync = useRef(false);
+  const roundRef = useRef(1);
+
+  useEffect(() => {
+    roundRef.current = round;
+  }, [round]);
 
   const loadData = useCallback(async () => {
     const { data, error: fetchError } = await supabase
@@ -43,7 +77,7 @@ export default function App() {
       return;
     }
 
-    const payload = data?.data || { members: [], round: 1 };
+    const payload = data?.data || { members: [], round: 1, log: [] };
 
     if (!payload.members || payload.members.length === 0) {
       const defaults = ["Abie", "Niall", "Mark", "Richie"].map((name) => ({
@@ -52,13 +86,15 @@ export default function App() {
         paid: false,
         pints: 0,
       }));
-      const seeded = { members: defaults, round: 1 };
+      const seeded = { members: defaults, round: 1, log: [] };
       await supabase.from("keg_data").update({ data: seeded }).eq("id", ROW_ID);
       setMembers(defaults);
       setRound(1);
+      setLog([]);
     } else {
       setMembers(payload.members);
       setRound(payload.round || 1);
+      setLog(payload.log || []);
     }
     setError(null);
   }, []);
@@ -80,6 +116,7 @@ export default function App() {
           if (newData) {
             setMembers(newData.members || []);
             setRound(newData.round || 1);
+            setLog(newData.log || []);
           }
         }
       )
@@ -90,11 +127,11 @@ export default function App() {
     };
   }, [loadData]);
 
-  const persist = useCallback(async (nextMembers, nextRound) => {
+  const persist = useCallback(async (nextMembers, nextRound, nextLog) => {
     skipNextSync.current = true;
     const { error: saveError } = await supabase
       .from("keg_data")
-      .update({ data: { members: nextMembers, round: nextRound } })
+      .update({ data: { members: nextMembers, round: nextRound, log: nextLog } })
       .eq("id", ROW_ID);
 
     if (saveError) {
@@ -104,44 +141,74 @@ export default function App() {
     }
   }, []);
 
-  const updateMembers = (updater) => {
-    setMembers((prev) => {
-      const next = updater(prev);
-      persist(next, round);
-      return next;
+  // Applies a member-state change and records a matching log entry, then persists both.
+  const applyChange = (memberUpdater, describe) => {
+    setMembers((prevMembers) => {
+      const nextMembers = memberUpdater(prevMembers);
+      const text = describe(nextMembers, prevMembers);
+      setLog((prevLog) => {
+        const nextLog = text
+          ? [{ id: uid(), ts: new Date().toISOString(), text }, ...prevLog].slice(0, MAX_LOG_ENTRIES)
+          : prevLog;
+        persist(nextMembers, roundRef.current, nextLog);
+        return nextLog;
+      });
+      return nextMembers;
     });
   };
 
   const addMember = () => {
     const name = newName.trim();
     if (!name) return;
-    updateMembers((prev) => [...prev, { id: uid(), name, paid: false, pints: 0 }]);
+    applyChange(
+      (prev) => [...prev, { id: uid(), name, paid: false, pints: 0 }],
+      () => `${name} added to the keg`
+    );
     setNewName("");
   };
 
   const togglePaid = (id) => {
-    updateMembers((prev) => prev.map((m) => (m.id === id ? { ...m, paid: !m.paid } : m)));
+    applyChange(
+      (prev) => prev.map((m) => (m.id === id ? { ...m, paid: !m.paid } : m)),
+      (nextMembers) => {
+        const m = nextMembers.find((x) => x.id === id);
+        return `${m.name} marked ${m.paid ? "Paid" : "Unpaid"}`;
+      }
+    );
   };
 
   const adjustPints = (id, delta) => {
-    updateMembers((prev) =>
-      prev.map((m) =>
-        m.id === id ? { ...m, pints: Math.min(PINTS_PER_SHARE, Math.max(0, m.pints + delta)) } : m
-      )
+    applyChange(
+      (prev) =>
+        prev.map((m) =>
+          m.id === id ? { ...m, pints: Math.min(PINTS_PER_SHARE, Math.max(0, m.pints + delta)) } : m
+        ),
+      (nextMembers, prevMembers) => {
+        const nm = nextMembers.find((x) => x.id === id);
+        const pm = prevMembers.find((x) => x.id === id);
+        if (nm.pints === pm.pints) return null;
+        const actualDelta = nm.pints - pm.pints;
+        return `${nm.name} ${actualDelta > 0 ? "logged a pint" : "undid a pint"} (${nm.pints}/${PINTS_PER_SHARE})`;
+      }
     );
   };
 
   const removeMember = (id) => {
-    updateMembers((prev) => prev.filter((m) => m.id !== id));
+    const target = members.find((m) => m.id === id);
+    applyChange(
+      (prev) => prev.filter((m) => m.id !== id),
+      () => (target ? `${target.name} removed` : null)
+    );
     setConfirmRemove(null);
   };
 
   const startNewRound = () => {
-    const resetMembers = members.map((m) => ({ ...m, paid: false, pints: 0 }));
     const nextRound = round + 1;
-    setMembers(resetMembers);
+    applyChange(
+      (prev) => prev.map((m) => ({ ...m, paid: false, pints: 0 })),
+      () => `Started round ${nextRound}`
+    );
     setRound(nextRound);
-    persist(resetMembers, nextRound);
     setConfirmReset(false);
   };
 
@@ -160,11 +227,11 @@ export default function App() {
   return (
     <div style={{ background: COLORS.stout, minHeight: "100vh", fontFamily: "system-ui, -apple-system, sans-serif", color: COLORS.cream, padding: "0" }}>
       <div style={{ maxWidth: "480px", margin: "0 auto", padding: "28px 20px 60px" }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "4px" }}>
-          <h1 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "28px", fontWeight: "400", letterSpacing: "0.2px", margin: 0, color: COLORS.cream }}>
-            The Snug Ledger
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px" }}>
+          <h1 style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "27px", fontWeight: "400", letterSpacing: "0.2px", margin: 0, color: COLORS.cream }}>
+            Dads Keg Tracker
           </h1>
-          <Beer size={22} color={COLORS.brass} strokeWidth={1.75} />
+          <KegIcon size={26} color={COLORS.brass} />
         </div>
         <p style={{ color: COLORS.creamDim, fontSize: "13px", margin: "0 0 22px", lineHeight: 1.5 }}>
           Round {round} · €{PRICE_PER_SHARE} per share · {PINTS_PER_SHARE} pints per share
@@ -180,15 +247,15 @@ export default function App() {
         <div style={{ display: "flex", justifyContent: "space-between", borderTop: `1px solid ${COLORS.stoutLine}`, borderBottom: `1px solid ${COLORS.stoutLine}`, padding: "14px 2px", marginBottom: "24px" }}>
           <div>
             <div style={{ fontSize: "11px", color: COLORS.creamDim, marginBottom: "3px" }}>Paid</div>
-            <div style={{ fontFamily: "Georgia, serif", fontSize: "17px", fontVariantNumeric: "tabular-nums" }}>{paidCount} / {members.length}</div>
+            <div style={{ fontFamily: "Georgia, serif", fontSize: "17px", fontVariantNumeric: "tabular-nums", color: COLORS.cream }}>{paidCount} / {members.length}</div>
           </div>
           <div>
             <div style={{ fontSize: "11px", color: COLORS.creamDim, marginBottom: "3px" }}>Collected</div>
-            <div style={{ fontFamily: "Georgia, serif", fontSize: "17px", fontVariantNumeric: "tabular-nums" }}>€{totalCollected}</div>
+            <div style={{ fontFamily: "Georgia, serif", fontSize: "17px", fontVariantNumeric: "tabular-nums", color: COLORS.cream }}>€{totalCollected}</div>
           </div>
           <div>
             <div style={{ fontSize: "11px", color: COLORS.creamDim, marginBottom: "3px" }}>Pints left</div>
-            <div style={{ fontFamily: "Georgia, serif", fontSize: "17px", fontVariantNumeric: "tabular-nums" }}>{totalPintsLeft}</div>
+            <div style={{ fontFamily: "Georgia, serif", fontSize: "17px", fontVariantNumeric: "tabular-nums", color: COLORS.cream }}>{totalPintsLeft}</div>
           </div>
         </div>
 
@@ -206,7 +273,7 @@ export default function App() {
                 <div key={m.id} style={{ borderTop: `1px solid ${COLORS.stoutLine}`, padding: "16px 2px" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <span style={{ fontSize: "15px" }}>{m.name}</span>
+                      <span style={{ fontSize: "15px", color: COLORS.cream }}>{m.name}</span>
                       <button onClick={() => togglePaid(m.id)} style={{ display: "flex", alignItems: "center", gap: "4px", background: m.paid ? "rgba(110,131,103,0.18)" : "transparent", border: `1px solid ${m.paid ? COLORS.good : COLORS.brassDim}`, borderRadius: "3px", color: m.paid ? COLORS.good : COLORS.creamDim, fontSize: "11px", padding: "3px 8px", cursor: "pointer" }}>
                         {m.paid && <Check size={11} strokeWidth={2.5} />}
                         {m.paid ? "Paid" : "Unpaid"}
@@ -254,6 +321,57 @@ export default function App() {
           <button onClick={addMember} style={{ background: COLORS.brass, color: COLORS.stout, border: "none", borderRadius: "4px", padding: "0 16px", fontSize: "13px", fontWeight: "600", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px" }}>
             <Plus size={14} strokeWidth={2.5} /> Add
           </button>
+        </div>
+
+        {/* Activity log */}
+        <div style={{ marginTop: "24px", borderTop: `1px solid ${COLORS.stoutLine}`, paddingTop: "16px" }}>
+          <button
+            onClick={() => setShowLog((s) => !s)}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              background: "none",
+              border: "none",
+              color: COLORS.creamDim,
+              fontSize: "13px",
+              cursor: "pointer",
+              padding: "4px 2px",
+            }}
+          >
+            <span>Activity log{log.length > 0 ? ` (${log.length})` : ""}</span>
+            {showLog ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
+
+          {showLog && (
+            <div style={{ marginTop: "10px" }}>
+              {log.length === 0 ? (
+                <p style={{ color: COLORS.creamDim, fontSize: "12.5px", padding: "8px 2px" }}>
+                  No activity yet.
+                </p>
+              ) : (
+                log.map((entry) => (
+                  <div
+                    key={entry.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: "10px",
+                      padding: "6px 2px",
+                      fontSize: "12.5px",
+                      borderTop: `1px solid ${COLORS.stoutLine}`,
+                    }}
+                  >
+                    <span style={{ color: COLORS.cream }}>{entry.text}</span>
+                    <span style={{ color: COLORS.creamDim, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                      {formatTimestamp(entry.ts)}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
         <div style={{ marginTop: "32px", textAlign: "center" }}>
